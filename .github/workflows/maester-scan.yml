@@ -2,11 +2,11 @@ name: Maester Daily Scan
 on:
   workflow_call:
     secrets:
-      AZURE_TENANT_ID:
+      ENTRA_TENANT_ID:
         required: true
-      AZURE_CLIENT_ID:
+      ENTRA_CLIENT_ID:
         required: true
-      MSP_CLIENT_SECRET:
+      ENTRA_CLIENT_SECRET:
         required: true
       IONOS_API_TOKEN:
         required: false
@@ -23,20 +23,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Datum setzen
         run: echo "NOW=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
-      - name: Login via OIDC (kein Passwort!)
-        uses: azure/login@v2
-        with:
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          allow-no-subscriptions: true
       - name: Maester ausfuehren
         shell: pwsh
         run: |
           Install-Module Maester -Force -Scope CurrentUser
-          $token = az account get-access-token --resource-type ms-graph
-          $at = ($token | ConvertFrom-Json).accessToken |
-                ConvertTo-SecureString -AsPlainText -Force
-          Connect-MgGraph -AccessToken $at
+          $secSec = ConvertTo-SecureString $env:ENTRA_CLIENT_SECRET -AsPlainText -Force
+          $cred = New-Object System.Management.Automation.PSCredential($env:ENTRA_CLIENT_ID,$secSec)
+          Connect-MgGraph -TenantId $env:ENTRA_TENANT_ID -ClientSecretCredential $cred
           Install-MaesterTests -Path ./tests
           $cfg = New-PesterConfiguration
           $cfg.Output.Verbosity = 'None'
@@ -64,14 +57,14 @@ jobs:
         if: always()
         shell: pwsh
         env:
-          MSP_CLIENT_SECRET: ${{ secrets.MSP_CLIENT_SECRET }}
+          ENTRA_CLIENT_SECRET: ${{ secrets.ENTRA_CLIENT_SECRET }}
         run: |
           $mspTenantId = "6c1f92df-46a7-494d-85d3-38e6cd530727"
           $mspClientId = "561e2e7c-3b54-4128-8b3b-f752179af77a"
           $body = @{
             grant_type    = "client_credentials"
             client_id     = $mspClientId
-            client_secret = $env:MSP_CLIENT_SECRET
+            client_secret = $env:ENTRA_CLIENT_SECRET
             scope         = "https://graph.microsoft.com/.default"
           }
           $tokenResp = Invoke-RestMethod -Method Post `
