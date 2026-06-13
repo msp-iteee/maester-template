@@ -1,0 +1,13 @@
+name: M365 Security Scan
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+jobs:
+  scan:
+    uses: msp-iteee/maester-template/.github/workflows/maester-scan.yml@main
+    secrets:
+      ENTRA_TENANT_ID:     ${{ secrets.ENTRA_TENANT_ID }}
+      ENTRA_CLIENT_ID:     ${{ secrets.ENTRA_CLIENT_ID }}
+      ENTRA_CLIENT_SECRET: ${{ secrets.ENTRA_CLIENT_SECRET }}
+      IONOS_API_TOKEN:     ${{ secrets.IONOS_API_TOKEN }}
