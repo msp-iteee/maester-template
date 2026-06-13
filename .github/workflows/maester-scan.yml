@@ -13,6 +13,9 @@ on:
 permissions:
   id-token: write
   contents: read
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   run-maester:
     runs-on: [self-hosted, proxmox, maester]
