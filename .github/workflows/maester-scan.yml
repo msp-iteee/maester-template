@@ -7,6 +7,8 @@ on:
         required: true
       AZURE_CLIENT_ID:
         required: true
+      MSP_CLIENT_SECRET:
+        required: true
 
 permissions:
   id-token: write
@@ -51,17 +53,44 @@ jobs:
           name: maester-report-${{ env.NOW }}
           path: test-results
 
-      - name: E-Mail senden
-        uses: dawidd6/action-send-mail@v3
+      - name: E-Mail via Microsoft Graph senden
         if: always()
-        with:
-          server_address: smtp.office365.com
-          server_port: 587
-          username: ${{ secrets.MAIL_USER }}
-          password: ${{ secrets.MAIL_PASSWORD }}
-          subject: "Maester Report ${{ env.NOW }} - ${{ github.repository }}"
-          to: security@it-eee.de
-          from: maester@it-eee.de
-          html_body: |
-            Scan abgeschlossen fuer: ${{ github.repository }}
-            Direkt zum Report: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: pwsh
+        env:
+          MSP_CLIENT_SECRET: ${{ secrets.MSP_CLIENT_SECRET }}
+        run: |
+          $mspTenantId = "6c1f92df-46a7-494d-85d3-38e6cd530727"
+          $mspClientId = "561e2e7c-3b54-4128-8b3b-f752179af77a"
+
+          $body = @{
+            grant_type    = "client_credentials"
+            client_id     = $mspClientId
+            client_secret = $env:MSP_CLIENT_SECRET
+            scope         = "https://graph.microsoft.com/.default"
+          }
+          $tokenResp = Invoke-RestMethod -Method Post `
+            -Uri "https://login.microsoftonline.com/$mspTenantId/oauth2/v2.0/token" `
+            -Body $body
+
+          $headers = @{
+            Authorization  = "Bearer $($tokenResp.access_token)"
+            "Content-Type" = "application/json"
+          }
+
+          $mail = @{
+            message = @{
+              subject = "Maester Report $env:NOW - $env:GITHUB_REPOSITORY"
+              body = @{
+                contentType = "HTML"
+                content = "Scan abgeschlossen fuer: <b>$env:GITHUB_REPOSITORY</b><br><br><a href='$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID'>Direkt zum Report</a>"
+              }
+              toRecipients = @(@{ emailAddress = @{ address = "security@it-eee.de" } })
+              from = @{ emailAddress = @{ address = "info@it-eee.de" } }
+            }
+            saveToSentItems = $false
+          } | ConvertTo-Json -Depth 10
+
+          Invoke-RestMethod -Method Post `
+            -Uri "https://graph.microsoft.com/v1.0/users/info@it-eee.de/sendMail" `
+            -Headers $headers `
+            -Body $mail
