@@ -35,10 +35,16 @@ jobs:
           Install-MaesterTests -Path ./tests
           $cfg = New-PesterConfiguration
           $cfg.Output.Verbosity = 'None'
-          Invoke-Maester -Path ./tests -PesterConfiguration $cfg `
-            -OutputFolder test-results -OutputFolderFileName "test-results" -PassThru
-          $md = Get-Content test-results/test-results.md
-          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $md
+          try {
+            Invoke-Maester -Path ./tests -PesterConfiguration $cfg `
+              -OutputFolder test-results -OutputFolderFileName "test-results" -PassThru
+          } catch {
+            Write-Host "Browser-Open uebersprungen (kein GUI): $_"
+          }
+          if (Test-Path test-results/test-results.md) {
+            $md = Get-Content test-results/test-results.md
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $md
+          }
       - name: HTML-Report hochladen
         uses: actions/upload-artifact@v4
         if: always()
