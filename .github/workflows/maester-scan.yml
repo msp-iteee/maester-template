@@ -10,9 +10,6 @@ on:
         required: true
       IONOS_API_TOKEN:
         required: false
-permissions:
-  id-token: write
-  contents: read
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -24,6 +21,10 @@ jobs:
       - name: Datum setzen
         run: echo "NOW=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
       - name: Maester ausfuehren
+        env:
+          ENTRA_TENANT_ID:     ${{ secrets.ENTRA_TENANT_ID }}
+          ENTRA_CLIENT_ID:     ${{ secrets.ENTRA_CLIENT_ID }}
+          ENTRA_CLIENT_SECRET: ${{ secrets.ENTRA_CLIENT_SECRET }}
         shell: pwsh
         run: |
           Install-Module Maester -Force -Scope CurrentUser
