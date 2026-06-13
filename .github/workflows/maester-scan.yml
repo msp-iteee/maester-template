@@ -161,6 +161,33 @@ jobs:
             Write-Host "Tests geparst: $($testsArr.Count)"
           }
           if ($testsArr.Count -gt 0) { $payload.tests = $testsArr }
+
+          # Einzeltests aus Maester-Markdown parsen
+          $testsArr = @()
+          if (Test-Path "test-results/test-results.md") {
+            $lines = Get-Content "test-results/test-results.md"
+            foreach ($line in $lines) {
+              if ($line -match '^\|\s*([A-Za-z][A-Za-z0-9\.\-_]{2,}?)\s*\|\s*(.+?)\s*\|\s*([✅❌]|Pass|Fail|passed|failed)') {
+                $tid   = $Matches[1].Trim()
+                $tname = ($Matches[2].Trim() -replace '\*','').Trim()
+                $res   = if ($Matches[3] -match '[✅]|Pass|passed') { 'passed' } else { 'failed' }
+                $testsArr += @{ id=$tid; name=$tname; result=$res; category='' }
+              }
+            }
+            if ($testsArr.Count -eq 0) {
+              $i = 0
+              foreach ($line in $lines) {
+                if ($line -match '^\|\s*(.{5,100}?)\s*\|\s*([✅❌]|Pass|Fail)') {
+                  $tname = ($Matches[1].Trim() -replace '\*','').Trim()
+                  $res   = if ($Matches[2] -match '[✅]|Pass') { 'passed' } else { 'failed' }
+                  $testsArr += @{ id="test.$i"; name=$tname; result=$res; category='' }
+                  $i++
+                }
+              }
+            }
+            Write-Host "Tests geparst: $($testsArr.Count)"
+          }
+          if ($testsArr.Count -gt 0) { $payload.tests = $testsArr }
           try {
             $resp = Invoke-RestMethod -Uri "https://mspsecurity.it-eee.de/api/ingest.php" `
               -Method Post -Body ($payload | ConvertTo-Json -Compress) `
