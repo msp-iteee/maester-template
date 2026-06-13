@@ -93,36 +93,36 @@ jobs:
             -Headers $headers `
             -Body $mail
 
-        - name: Ergebnisse an MSP Security Dashboard senden
-          if: always()
-          shell: pwsh
-          env:
-            IONOS_API_TOKEN: ${{ secrets.IONOS_API_TOKEN }}
-          run: |
-            $kunde = ($env:GITHUB_REPOSITORY -split '/')[-1] -replace '^kunde-', ''
-            $today = (Get-Date -Format 'yyyy-MM-dd')
-            $passed = 0
-            $failed = 0
-            if (Test-Path "test-results/test-results.md") {
-              $md = Get-Content "test-results/test-results.md" -Raw
-              if ($md -match '(\d+) passed') { $passed = [int]$Matches[1] }
-              if ($md -match '(\d+) failed') { $failed = [int]$Matches[1] }
+      - name: Ergebnisse an MSP Security Dashboard senden
+        if: always()
+        shell: pwsh
+        env:
+          IONOS_API_TOKEN: ${{ secrets.IONOS_API_TOKEN }}
+        run: |
+          $kunde = ($env:GITHUB_REPOSITORY -split '/')[-1] -replace '^kunde-', ''
+          $today = (Get-Date -Format 'yyyy-MM-dd')
+          $passed = 0
+          $failed = 0
+          if (Test-Path "test-results/test-results.md") {
+            $md = Get-Content "test-results/test-results.md" -Raw
+            if ($md -match '(\d+) passed') { $passed = [int]$Matches[1] }
+            if ($md -match '(\d+) failed') { $failed = [int]$Matches[1] }
+          }
+          $reportHtml = $null
+          if (Test-Path "test-results/test-results.html") {
+            $size = (Get-Item "test-results/test-results.html").Length
+            if ($size -lt 4MB) {
+              $bytes = [System.IO.File]::ReadAllBytes("test-results/test-results.html")
+              $reportHtml = [Convert]::ToBase64String($bytes)
             }
-            $reportHtml = $null
-            if (Test-Path "test-results/test-results.html") {
-              $size = (Get-Item "test-results/test-results.html").Length
-              if ($size -lt 4MB) {
-                $bytes = [System.IO.File]::ReadAllBytes("test-results/test-results.html")
-                $reportHtml = [Convert]::ToBase64String($bytes)
-              }
-            }
-            $payload = @{ token=$env:IONOS_API_TOKEN; customer=$kunde; date=$today; passed=$passed; failed=$failed }
-            if ($reportHtml) { $payload.report_html = $reportHtml }
-            try {
-              $resp = Invoke-RestMethod -Uri "https://mspsecurity.it-eee.de/api/ingest.php" `
-                -Method Post -Body ($payload | ConvertTo-Json -Compress) `
-                -ContentType "application/json" -TimeoutSec 60
-              Write-Host "Dashboard: $($resp | ConvertTo-Json -Compress)"
-            } catch {
-              Write-Host "Dashboard-Upload fehlgeschlagen (nicht kritisch): $_"
-            }
+          }
+          $payload = @{ token=$env:IONOS_API_TOKEN; customer=$kunde; date=$today; passed=$passed; failed=$failed }
+          if ($reportHtml) { $payload.report_html = $reportHtml }
+          try {
+            $resp = Invoke-RestMethod -Uri "https://mspsecurity.it-eee.de/api/ingest.php" `
+              -Method Post -Body ($payload | ConvertTo-Json -Compress) `
+              -ContentType "application/json" -TimeoutSec 60
+            Write-Host "Dashboard: $($resp | ConvertTo-Json -Compress)"
+          } catch {
+            Write-Host "Dashboard-Upload fehlgeschlagen (nicht kritisch): $_"
+          }
