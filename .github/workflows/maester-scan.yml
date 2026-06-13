@@ -107,8 +107,16 @@ jobs:
           $failed = 0
           if (Test-Path "test-results/test-results.md") {
             $md = Get-Content "test-results/test-results.md" -Raw
+            Write-Host "=== MD ERSTE 20 ZEILEN ==="
+            ($md -split "`n")[0..19] | ForEach-Object { Write-Host $_ }
+            Write-Host "=== MD ENDE ==="
             if ($md -match '(\d+) passed') { $passed = [int]$Matches[1] }
+            elseif ($md -match 'Passed[:\s|]+([0-9]+)') { $passed = [int]$Matches[1] }
+            elseif ($md -match '✅[^0-9]*([0-9]+)') { $passed = [int]$Matches[1] }
             if ($md -match '(\d+) failed') { $failed = [int]$Matches[1] }
+            elseif ($md -match 'Failed[:\s|]+([0-9]+)') { $failed = [int]$Matches[1] }
+            elseif ($md -match '❌[^0-9]*([0-9]+)') { $failed = [int]$Matches[1] }
+            Write-Host "Parsed: passed=$passed failed=$failed" 
           }
           $reportHtml = $null
           if (Test-Path "test-results/test-results.html") {
