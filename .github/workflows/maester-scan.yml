@@ -42,7 +42,10 @@ jobs:
             Write-Host "Browser-Open uebersprungen (kein GUI): $_"
           }
           if (Test-Path test-results/test-results.md) {
-            $md = Get-Content test-results/test-results.md
+            $md = Get-Content test-results/test-results.md -Raw
+            if ($md.Length -gt 900000) {
+              $md = $md.Substring(0, 900000) + "`n`n*[Gekuerzt - vollstaendiger Report im Artifact]*"
+            }
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $md
           }
       - name: HTML-Report hochladen
