@@ -1,5 +1,4 @@
 name: Maester Daily Scan
-
 on:
   workflow_call:
     secrets:
@@ -9,35 +8,30 @@ on:
         required: true
       MSP_CLIENT_SECRET:
         required: true
-
 permissions:
   id-token: write
   contents: read
-
 jobs:
   run-maester:
     runs-on: [self-hosted, proxmox, maester]
     steps:
       - uses: actions/checkout@v4
-
       - name: Datum setzen
         run: echo "NOW=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
-
       - name: Login via OIDC (kein Passwort!)
         uses: azure/login@v2
         with:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           allow-no-subscriptions: true
-
       - name: Maester ausfuehren
         shell: pwsh
         run: |
+          Install-Module Maester -Force -Scope CurrentUser
           $token = az account get-access-token --resource-type ms-graph
           $at = ($token | ConvertFrom-Json).accessToken |
                 ConvertTo-SecureString -AsPlainText -Force
           Connect-MgGraph -AccessToken $at
-          Install-Module Maester -Force -Scope CurrentUser
           Install-MaesterTests -Path ./tests
           $cfg = New-PesterConfiguration
           $cfg.Output.Verbosity = 'None'
@@ -45,14 +39,12 @@ jobs:
             -OutputFolder test-results -OutputFolderFileName "test-results" -PassThru
           $md = Get-Content test-results/test-results.md
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $md
-
       - name: HTML-Report hochladen
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: maester-report-${{ env.NOW }}
           path: test-results
-
       - name: E-Mail via Microsoft Graph senden
         if: always()
         shell: pwsh
@@ -61,7 +53,6 @@ jobs:
         run: |
           $mspTenantId = "6c1f92df-46a7-494d-85d3-38e6cd530727"
           $mspClientId = "561e2e7c-3b54-4128-8b3b-f752179af77a"
-
           $body = @{
             grant_type    = "client_credentials"
             client_id     = $mspClientId
@@ -71,12 +62,10 @@ jobs:
           $tokenResp = Invoke-RestMethod -Method Post `
             -Uri "https://login.microsoftonline.com/$mspTenantId/oauth2/v2.0/token" `
             -Body $body
-
           $headers = @{
             Authorization  = "Bearer $($tokenResp.access_token)"
             "Content-Type" = "application/json"
           }
-
           $mail = @{
             message = @{
               subject = "Maester Report $env:NOW - $env:GITHUB_REPOSITORY"
@@ -89,7 +78,6 @@ jobs:
             }
             saveToSentItems = $false
           } | ConvertTo-Json -Depth 10
-
           Invoke-RestMethod -Method Post `
             -Uri "https://graph.microsoft.com/v1.0/users/info@it-eee.de/sendMail" `
             -Headers $headers `
