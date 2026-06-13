@@ -8,6 +8,8 @@ on:
         required: true
       MSP_CLIENT_SECRET:
         required: true
+      IONOS_API_TOKEN:
+        required: false
 permissions:
   id-token: write
   contents: read
@@ -126,3 +128,4 @@ jobs:
           } catch {
             Write-Host "Dashboard-Upload fehlgeschlagen (nicht kritisch): $_"
           }
+
