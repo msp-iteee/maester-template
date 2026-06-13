@@ -120,9 +120,16 @@ jobs:
           $reportHtml = $null
           if (Test-Path "test-results/test-results.html") {
             $size = (Get-Item "test-results/test-results.html").Length
-            if ($size -lt 4MB) {
+            if ($size -lt 15MB) {
               $bytes = [System.IO.File]::ReadAllBytes("test-results/test-results.html")
-              $reportHtml = [Convert]::ToBase64String($bytes)
+              $ms    = New-Object System.IO.MemoryStream
+              $gz    = New-Object System.IO.Compression.GZipStream($ms, [System.IO.Compression.CompressionMode]::Compress)
+              $gz.Write($bytes, 0, $bytes.Length)
+              $gz.Close()
+              $reportHtml = [Convert]::ToBase64String($ms.ToArray())
+              Write-Host "Report: $([math]::Round($size/1MB,1)) MB -> $([math]::Round($ms.Length/1KB,0)) KB (gzip)"
+            } else {
+              Write-Host "Report zu gross ($([math]::Round($size/1MB,1)) MB), wird nicht gesendet."
             }
           }
           $payload = @{ token=$env:IONOS_API_TOKEN; customer=$kunde; date=$today; passed=$passed; failed=$failed }
