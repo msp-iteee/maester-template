@@ -44,7 +44,6 @@ jobs:
             Write-Host "Maester-Fehler (kein GUI): $_"
           }
 
-          # Test-Ergebnisse aus PassThru-Objekt als JSON sichern
           if ($mr -and $mr.Tests -and $mr.Tests.Count -gt 0) {
             $i = 0
             $testData = $mr.Tests | ForEach-Object {
@@ -67,7 +66,9 @@ jobs:
 
           if (Test-Path test-results/test-results.md) {
             $md = Get-Content test-results/test-results.md -Raw
-            if ($md.Length -gt 900000) { $md = $md.Substring(0, 900000) + "`n`n*[Gekuerzt]*" }
+            if ($md.Length -gt 900000) {
+              $md = $md.Substring(0, 900000) + "`n`n*[Gekuerzt]*"
+            }
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $md
           }
           exit 0
@@ -109,7 +110,6 @@ jobs:
               $gz.Write($bytes, 0, $bytes.Length)
               $gz.Close()
               $reportHtml = [Convert]::ToBase64String($ms.ToArray())
-              Write-Host "Report: $([math]::Round($size/1MB,1)) MB -> $([math]::Round($ms.Length/1KB,0)) KB (gzip)"
             }
           }
 
@@ -117,6 +117,7 @@ jobs:
           if ($reportHtml) { $payload.report_html = $reportHtml }
 
           $testsArr = @()
+
           if (Test-Path "test-results/maester-tests.json") {
             try {
               $testsArr = @(Get-Content "test-results/maester-tests.json" -Raw | ConvertFrom-Json)
@@ -132,18 +133,20 @@ jobs:
             $i = 0
             foreach ($line in $lines) {
               if ($line -match '^\|\s*[✅❌🟢🔴]\s*\|\s*([A-Za-z][A-Za-z0-9\.\-_]{3,})\s*\|\s*(.+?)\s*\|') {
-                $tid=$Matches[1].Trim(); $tname=($Matches[2] -replace '\*','').Trim()
-                $res=if($line -match '[✅🟢]'){'passed'}else{'failed'}
-                if($tname -notmatch '^[-:]+$|Total|^Name'){$testsArr+=@{id=$tid;name=$tname;result=$res;category=''};$i++}
-              } elseif ($line -match '^\|\s*([A-Za-z][A-Za-z0-9\.\-_]{3,})\s*\|\s*(.+?)\s*\|\s*([✅❌🟢🔴]|Pass|Fail)') {
-                $tid=$Matches[1].Trim(); $tname=($Matches[2] -replace '\*','').Trim()
-                $res=if($Matches[3] -match '[✅🟢]|Pass'){'passed'}else{'failed'}
-                if($tname -notmatch '^[-:]+$|Total|^Name'){$testsArr+=@{id=$tid;name=$tname;result=$res;category=''};$i++}
-              } elseif ($line -match '^\|\s*([✅❌🟢🔴])[^|]*\|\s*([A-Za-z][A-Za-z0-9\.\-_]{3,}[:\s].+?)\s*\|') {
-                $res=if($Matches[1] -match '[✅🟢]'){'passed'}else{'failed'}
-                $full=$Matches[2].Trim(); $tid="test.$i"; $tname=$full
-                if($full -match '^([A-Z]{2,}\.[A-Za-z0-9\.]+)[:\s]+(.+)$'){$tid=$Matches[1];$tname=$Matches[2].Trim()}
-                $testsArr+=@{id=$tid;name=($tname -replace '\*','').Trim();result=$res;category=''};$i++
+                $tid   = $Matches[1].Trim()
+                $tname = ($Matches[2] -replace '\*','').Trim()
+                $res   = if ($line -match '[✅🟢]') { 'passed' } else { 'failed' }
+                if ($tname -notmatch '^[-:]+$|Total|^Name') {
+                  $testsArr += @{ id=$tid; name=$tname; result=$res; category='' }; $i++
+                }
+              }
+              elseif ($line -match '^\|\s*([A-Za-z][A-Za-z0-9\.\-_]{3,})\s*\|\s*(.+?)\s*\|\s*([✅❌🟢🔴]|Pass|Fail)') {
+                $tid   = $Matches[1].Trim()
+                $tname = ($Matches[2] -replace '\*','').Trim()
+                $res   = if ($Matches[3] -match '[✅🟢]|Pass') { 'passed' } else { 'failed' }
+                if ($tname -notmatch '^[-:]+$|Total|^Name') {
+                  $testsArr += @{ id=$tid; name=$tname; result=$res; category='' }; $i++
+                }
               }
             }
             Write-Host "Tests aus Markdown: $($testsArr.Count)"
