@@ -83,7 +83,15 @@ jobs:
               $passed = [int]($mj.PassedCount)
               $failed = [int]($mj.FailedCount) + [int]($mj.ErrorCount) + [int]($mj.InvestigateCount)
               $testsArr = @($mj.Tests | Where-Object { $_.Id } | ForEach-Object {
-                $res = if ($_.Result -eq 'Passed') { 'passed' } else { 'failed' }
+                $res = switch ($_.Result) {
+                  'Passed'      { 'passed' }
+                  'Failed'      { 'failed' }
+                  'Error'       { 'error' }
+                  'Investigate' { 'investigate' }
+                  'Skipped'     { 'skipped' }
+                  'NotRun'      { 'notrun' }
+                  default       { 'failed' }
+                }
                 @{ id=$_.Id; name=$_.Title; result=$res; category='' }
               })
               Write-Host "Tests aus Maester-JSON: $($testsArr.Count) (passed=$passed failed=$failed)"
