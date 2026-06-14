@@ -20,6 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Datum setzen
         run: echo "NOW=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+
       - name: Maester ausfuehren
         env:
           ENTRA_TENANT_ID:     ${{ secrets.ENTRA_TENANT_ID }}
@@ -29,53 +30,75 @@ jobs:
         run: |
           Install-Module Maester -Force -Scope CurrentUser
           $secSec = ConvertTo-SecureString $env:ENTRA_CLIENT_SECRET -AsPlainText -Force
-          $cred = New-Object System.Management.Automation.PSCredential($env:ENTRA_CLIENT_ID,$secSec)
+          $cred = New-Object System.Management.Automation.PSCredential($env:ENTRA_CLIENT_ID, $secSec)
           Connect-MgGraph -TenantId $env:ENTRA_TENANT_ID -ClientSecretCredential $cred
           Install-MaesterTests -Path ./tests
           $cfg = New-PesterConfiguration
           $cfg.Output.Verbosity = 'None'
+
+          $mr = $null
           try {
-            Invoke-Maester -Path ./tests -PesterConfiguration $cfg `
+            $mr = Invoke-Maester -Path ./tests -PesterConfiguration $cfg `
               -OutputFolder test-results -OutputFolderFileName "test-results" -PassThru
           } catch {
-            Write-Host "Browser-Open uebersprungen (kein GUI): $_"
+            Write-Host "Maester-Fehler (kein GUI): $_"
           }
+
+          # Test-Ergebnisse aus PassThru-Objekt als JSON sichern
+          if ($mr -and $mr.Tests -and $mr.Tests.Count -gt 0) {
+            $i = 0
+            $testData = $mr.Tests | ForEach-Object {
+              $raw = ($_.ExpandedName -replace ' > .+$', '').Trim()
+              $tid = "test.$i"
+              $tname = $raw
+              if ($raw -match '^([A-Z]{2,}\.[A-Za-z0-9\.]+)[\s:]+(.*)$') {
+                $tid   = $Matches[1]
+                $tname = $Matches[2].Trim()
+              }
+              $res = if ($_.Result -eq 'Passed') { 'passed' } else { 'failed' }
+              $i++
+              @{ id=$tid; name=$tname; result=$res; category='' }
+            }
+            $testData | ConvertTo-Json -Depth 3 | Out-File "test-results/maester-tests.json" -Encoding UTF8
+            Write-Host "PassThru: $($mr.Tests.Count) Tests gespeichert"
+          } else {
+            Write-Host "Kein PassThru-Objekt - Fallback auf Markdown"
+          }
+
           if (Test-Path test-results/test-results.md) {
             $md = Get-Content test-results/test-results.md -Raw
-            if ($md.Length -gt 900000) {
-              $md = $md.Substring(0, 900000) + "`n`n*[Gekuerzt - vollstaendiger Report im Artifact]*"
-            }
+            if ($md.Length -gt 900000) { $md = $md.Substring(0, 900000) + "`n`n*[Gekuerzt]*" }
             Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $md
           }
           exit 0
+
       - name: HTML-Report hochladen
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: maester-report-${{ env.NOW }}
           path: test-results
+
       - name: Ergebnisse an MSP Security Dashboard senden
         if: always()
         shell: pwsh
         env:
           IONOS_API_TOKEN: ${{ secrets.IONOS_API_TOKEN }}
         run: |
-          $kunde = ($env:GITHUB_REPOSITORY -split '/')[-1] -replace '^kunde-', ''
-          $today = (Get-Date -Format 'yyyy-MM-dd')
+          $kunde  = ($env:GITHUB_REPOSITORY -split '/')[-1] -replace '^kunde-', ''
+          $today  = (Get-Date -Format 'yyyy-MM-dd')
           $passed = 0
           $failed = 0
+
           if (Test-Path "test-results/test-results.md") {
             $md = Get-Content "test-results/test-results.md" -Raw
-            Write-Host "=== MD ERSTE 20 ZEILEN ==="
-            ($md -split "`n")[0..19] | ForEach-Object { Write-Host $_ }
-            Write-Host "=== MD ENDE ==="
-            # Format: | **Total** | **Passed** | **Failed** | ...
             if ($md -match '\| \*\*(\d+)\*\* \| \*\*(\d+)\*\* \| \*\*(\d+)\*\*') {
               $passed = [int]$Matches[2]
               $failed = [int]$Matches[3]
             }
-            Write-Host "Parsed: passed=$passed failed=$failed" 
+            Write-Host "Parsed: passed=$passed failed=$failed"
           }
+
           $reportHtml = $null
           if (Test-Path "test-results/test-results.html") {
             $size = (Get-Item "test-results/test-results.html").Length
@@ -87,74 +110,52 @@ jobs:
               $gz.Close()
               $reportHtml = [Convert]::ToBase64String($ms.ToArray())
               Write-Host "Report: $([math]::Round($size/1MB,1)) MB -> $([math]::Round($ms.Length/1KB,0)) KB (gzip)"
-            } else {
-              Write-Host "Report zu gross ($([math]::Round($size/1MB,1)) MB), wird nicht gesendet."
             }
           }
+
           $payload = @{ token=$env:IONOS_API_TOKEN; customer=$kunde; date=$today; passed=$passed; failed=$failed }
           if ($reportHtml) { $payload.report_html = $reportHtml }
 
-          # Einzeltests aus Maester-Markdown parsen
           $testsArr = @()
-          if (Test-Path "test-results/test-results.md") {
-            $lines = Get-Content "test-results/test-results.md"
-            foreach ($line in $lines) {
-              if ($line -match '^\|\s*([A-Za-z][A-Za-z0-9\.\-_]{2,}?)\s*\|\s*(.+?)\s*\|\s*([\u2705\u274C]|Pass|Fail|passed|failed)') {
-                $tid   = $Matches[1].Trim()
-                $tname = ($Matches[2].Trim() -replace '\*','').Trim()
-                if ($tname -match '<br|Total Tests|^-+$|^:?-') { continue }
-                $res   = if ($Matches[3] -match '[\u2705]|Pass|passed') { 'passed' } else { 'failed' }
-                $testsArr += @{ id=$tid; name=$tname; result=$res; category='' }
-              }
+          if (Test-Path "test-results/maester-tests.json") {
+            try {
+              $testsArr = @(Get-Content "test-results/maester-tests.json" -Raw | ConvertFrom-Json)
+              Write-Host "Tests aus JSON: $($testsArr.Count)"
+            } catch {
+              Write-Host "JSON-Fehler: $_"
+              $testsArr = @()
             }
-            if ($testsArr.Count -eq 0) {
-              $i = 0
-              foreach ($line in $lines) {
-                if ($line -match '^\|\s*(.{5,100}?)\s*\|\s*([\u2705\u274C]|Pass|Fail)') {
-                  $tname = ($Matches[1].Trim() -replace '\*','').Trim()
-                  if ($tname -match '<br|Total Tests|^-+$|^:?-') { continue }
-                  $res   = if ($Matches[2] -match '[\u2705]|Pass') { 'passed' } else { 'failed' }
-                  $testsArr += @{ id="test.$i"; name=$tname; result=$res; category='' }
-                  $i++
-                }
-              }
-            }
-            Write-Host "Tests geparst: $($testsArr.Count)"
           }
+
+          if ($testsArr.Count -eq 0 -and (Test-Path "test-results/test-results.md")) {
+            $lines = Get-Content "test-results/test-results.md"
+            $i = 0
+            foreach ($line in $lines) {
+              if ($line -match '^\|\s*[✅❌🟢🔴]\s*\|\s*([A-Za-z][A-Za-z0-9\.\-_]{3,})\s*\|\s*(.+?)\s*\|') {
+                $tid=$Matches[1].Trim(); $tname=($Matches[2] -replace '\*','').Trim()
+                $res=if($line -match '[✅🟢]'){'passed'}else{'failed'}
+                if($tname -notmatch '^[-:]+$|Total|^Name'){$testsArr+=@{id=$tid;name=$tname;result=$res;category=''};$i++}
+              } elseif ($line -match '^\|\s*([A-Za-z][A-Za-z0-9\.\-_]{3,})\s*\|\s*(.+?)\s*\|\s*([✅❌🟢🔴]|Pass|Fail)') {
+                $tid=$Matches[1].Trim(); $tname=($Matches[2] -replace '\*','').Trim()
+                $res=if($Matches[3] -match '[✅🟢]|Pass'){'passed'}else{'failed'}
+                if($tname -notmatch '^[-:]+$|Total|^Name'){$testsArr+=@{id=$tid;name=$tname;result=$res;category=''};$i++}
+              } elseif ($line -match '^\|\s*([✅❌🟢🔴])[^|]*\|\s*([A-Za-z][A-Za-z0-9\.\-_]{3,}[:\s].+?)\s*\|') {
+                $res=if($Matches[1] -match '[✅🟢]'){'passed'}else{'failed'}
+                $full=$Matches[2].Trim(); $tid="test.$i"; $tname=$full
+                if($full -match '^([A-Z]{2,}\.[A-Za-z0-9\.]+)[:\s]+(.+)$'){$tid=$Matches[1];$tname=$Matches[2].Trim()}
+                $testsArr+=@{id=$tid;name=($tname -replace '\*','').Trim();result=$res;category=''};$i++
+              }
+            }
+            Write-Host "Tests aus Markdown: $($testsArr.Count)"
+          }
+
           if ($testsArr.Count -gt 0) { $payload.tests = $testsArr }
 
-          # Einzeltests aus Maester-Markdown parsen
-          $testsArr = @()
-          if (Test-Path "test-results/test-results.md") {
-            $lines = Get-Content "test-results/test-results.md"
-            foreach ($line in $lines) {
-              if ($line -match '^\|\s*([A-Za-z][A-Za-z0-9\.\-_]{2,}?)\s*\|\s*(.+?)\s*\|\s*([✅❌]|Pass|Fail|passed|failed)') {
-                $tid   = $Matches[1].Trim()
-                $tname = ($Matches[2].Trim() -replace '\*','').Trim()
-                $res   = if ($Matches[3] -match '[✅]|Pass|passed') { 'passed' } else { 'failed' }
-                $testsArr += @{ id=$tid; name=$tname; result=$res; category='' }
-              }
-            }
-            if ($testsArr.Count -eq 0) {
-              $i = 0
-              foreach ($line in $lines) {
-                if ($line -match '^\|\s*(.{5,100}?)\s*\|\s*([✅❌]|Pass|Fail)') {
-                  $tname = ($Matches[1].Trim() -replace '\*','').Trim()
-                  $res   = if ($Matches[2] -match '[✅]|Pass') { 'passed' } else { 'failed' }
-                  $testsArr += @{ id="test.$i"; name=$tname; result=$res; category='' }
-                  $i++
-                }
-              }
-            }
-            Write-Host "Tests geparst: $($testsArr.Count)"
-          }
-          if ($testsArr.Count -gt 0) { $payload.tests = $testsArr }
           try {
             $resp = Invoke-RestMethod -Uri "https://mspsecurity.it-eee.de/api/ingest.php" `
-              -Method Post -Body ($payload | ConvertTo-Json -Compress) `
+              -Method Post -Body ($payload | ConvertTo-Json -Depth 4 -Compress) `
               -ContentType "application/json" -TimeoutSec 60
             Write-Host "Dashboard: $($resp | ConvertTo-Json -Compress)"
           } catch {
             Write-Host "Dashboard-Upload fehlgeschlagen (nicht kritisch): $_"
           }
-
