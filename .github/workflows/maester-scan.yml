@@ -38,15 +38,20 @@ jobs:
 
           $mr = $null
           try {
+            # -ErrorAction SilentlyContinue verhindert dass der Browser-Open-Fehler
+            # die PassThru-Zuweisung blockiert (kein GUI auf Linux-Runner)
             $mr = Invoke-Maester -Path ./tests -PesterConfiguration $cfg `
-              -OutputFolder test-results -OutputFolderFileName "test-results" -PassThru
+              -OutputFolder test-results -OutputFolderFileName "test-results" -PassThru `
+              -ErrorAction SilentlyContinue
           } catch {
-            Write-Host "Maester-Fehler (kein GUI): $_"
+            Write-Host "Maester-Fehler: $_"
           }
 
+          # Test-Ergebnisse aus PassThru-Objekt als JSON sichern
           if ($mr -and $mr.Tests -and $mr.Tests.Count -gt 0) {
             $i = 0
             $testData = $mr.Tests | ForEach-Object {
+              # ExpandedName: "EIDSCA.MS.AAD.P1.01: Beschreibung > It-Block"
               $raw = ($_.ExpandedName -replace ' > .+$', '').Trim()
               $tid = "test.$i"
               $tname = $raw
@@ -61,9 +66,10 @@ jobs:
             $testData | ConvertTo-Json -Depth 3 | Out-File "test-results/maester-tests.json" -Encoding UTF8
             Write-Host "PassThru: $($mr.Tests.Count) Tests gespeichert"
           } else {
-            Write-Host "Kein PassThru-Objekt - Fallback auf Markdown"
+            Write-Host "Kein PassThru-Objekt — Fallback auf Markdown"
           }
 
+          # Step-Summary
           if (Test-Path test-results/test-results.md) {
             $md = Get-Content test-results/test-results.md -Raw
             if ($md.Length -gt 900000) {
@@ -91,6 +97,7 @@ jobs:
           $passed = 0
           $failed = 0
 
+          # Passed/Failed aus Markdown lesen
           if (Test-Path "test-results/test-results.md") {
             $md = Get-Content "test-results/test-results.md" -Raw
             if ($md -match '\| \*\*(\d+)\*\* \| \*\*(\d+)\*\* \| \*\*(\d+)\*\*') {
@@ -100,6 +107,7 @@ jobs:
             Write-Host "Parsed: passed=$passed failed=$failed"
           }
 
+          # HTML-Report komprimiert hochladen
           $reportHtml = $null
           if (Test-Path "test-results/test-results.html") {
             $size = (Get-Item "test-results/test-results.html").Length
@@ -110,14 +118,17 @@ jobs:
               $gz.Write($bytes, 0, $bytes.Length)
               $gz.Close()
               $reportHtml = [Convert]::ToBase64String($ms.ToArray())
+              Write-Host "Report: $([math]::Round($size/1MB,1)) MB -> $([math]::Round($ms.Length/1KB,0)) KB (gzip)"
             }
           }
 
           $payload = @{ token=$env:IONOS_API_TOKEN; customer=$kunde; date=$today; passed=$passed; failed=$failed }
           if ($reportHtml) { $payload.report_html = $reportHtml }
 
+          # ── Einzeltests laden ────────────────────────────────────────
           $testsArr = @()
 
+          # 1) Bevorzugt: JSON aus PassThru (korrekte Test-IDs)
           if (Test-Path "test-results/maester-tests.json") {
             try {
               $testsArr = @(Get-Content "test-results/maester-tests.json" -Raw | ConvertFrom-Json)
@@ -128,10 +139,12 @@ jobs:
             }
           }
 
+          # 2) Fallback: Markdown parsen — versuche mehrere Formate
           if ($testsArr.Count -eq 0 -and (Test-Path "test-results/test-results.md")) {
             $lines = Get-Content "test-results/test-results.md"
             $i = 0
             foreach ($line in $lines) {
+              # Format A: | emoji | EIDSCA.xx | Name |
               if ($line -match '^\|\s*[✅❌🟢🔴]\s*\|\s*([A-Za-z][A-Za-z0-9\.\-_]{3,})\s*\|\s*(.+?)\s*\|') {
                 $tid   = $Matches[1].Trim()
                 $tname = ($Matches[2] -replace '\*','').Trim()
@@ -140,6 +153,7 @@ jobs:
                   $testsArr += @{ id=$tid; name=$tname; result=$res; category='' }; $i++
                 }
               }
+              # Format B: | EIDSCA.xx | Name | emoji |
               elseif ($line -match '^\|\s*([A-Za-z][A-Za-z0-9\.\-_]{3,})\s*\|\s*(.+?)\s*\|\s*([✅❌🟢🔴]|Pass|Fail)') {
                 $tid   = $Matches[1].Trim()
                 $tname = ($Matches[2] -replace '\*','').Trim()
@@ -147,6 +161,17 @@ jobs:
                 if ($tname -notmatch '^[-:]+$|Total|^Name') {
                   $testsArr += @{ id=$tid; name=$tname; result=$res; category='' }; $i++
                 }
+              }
+              # Format C: | emoji | EIDSCA.xx: Name | (2-spaltig, ID im Namen)
+              elseif ($line -match '^\|\s*([✅❌🟢🔴])[^|]*\|\s*([A-Za-z][A-Za-z0-9\.\-_]{3,}[:\s].+?)\s*\|') {
+                $res     = if ($Matches[1] -match '[✅🟢]') { 'passed' } else { 'failed' }
+                $full    = $Matches[2].Trim()
+                $tid     = "test.$i"
+                $tname   = $full
+                if ($full -match '^([A-Z]{2,}\.[A-Za-z0-9\.]+)[:\s]+(.+)$') {
+                  $tid   = $Matches[1]; $tname = $Matches[2].Trim()
+                }
+                $testsArr += @{ id=$tid; name=($tname -replace '\*','').Trim(); result=$res; category='' }; $i++
               }
             }
             Write-Host "Tests aus Markdown: $($testsArr.Count)"
@@ -162,3 +187,5 @@ jobs:
           } catch {
             Write-Host "Dashboard-Upload fehlgeschlagen (nicht kritisch): $_"
           }
+
+          exit 0
